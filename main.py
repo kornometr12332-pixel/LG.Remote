@@ -3,27 +3,21 @@
 LG TV IR Remote Control
 Python + Kivy app for Pydroid 3 (Android) using phone's built-in IR blaster.
 Protocol: NEC (standard for most LG TVs)
-
-REQUIREMENTS (install inside Pydroid 3 via pip):
-    pip install kivy
-    pip install pyjnius   (usually already bundled with Pydroid 3)
-
-NOTE: Your phone MUST have a physical IR blaster (infrared LED).
-Most Xiaomi, Huawei, and some Samsung phones have this; iPhones do NOT.
 """
 
 import time
 from kivy.app import App
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.metrics import dp
+from kivy.graphics import Color, RoundedRectangle, Ellipse
+from kivy.core.window import Window
 
 # ----------------------------------------------------------------------
 # Try to load Android's ConsumerIrManager via pyjnius.
-# On desktop / non-Android systems, this will fail silently and the app
-# will run in "simulation mode" (prints to console instead of sending IR).
 # ----------------------------------------------------------------------
 ANDROID = True
 try:
@@ -44,39 +38,20 @@ except Exception as e:
 
 
 # ----------------------------------------------------------------------
-# NEC PROTOCOL ENCODER
+# NEC PROTOCOL ENCODER (UNCHANGED)
 # ----------------------------------------------------------------------
-# NEC frame structure (in microseconds), carrier = 38kHz:
-#   9000  leading burst
-#   4500  leading space
-#   For each of 32 bits (address, ~address, command, ~command):
-#       560   burst
-#       560 or 1690   space (0 or 1)
-#   560   final burst (stop bit)
-#
-# LG remotes commonly use NEC with address 0x04 (many LG TVs) or a
-# device-specific address. We use the widely-compatible generic LG
-# address 0x04 here. If a button doesn't work on your TV, the hex
-# code can be swapped out easily below.
-# ----------------------------------------------------------------------
-
-CARRIER_FREQ = 38000  # Hz, standard for NEC/LG
+CARRIER_FREQ = 38000
 
 def nec_pattern(address, command):
-    """
-    Build a pulse pattern (list of microsecond durations) for NEC protocol.
-    Pattern alternates: burst, space, burst, space, ...
-    Returns a list of ints as required by Android's ConsumerIrManager.transmit().
-    """
-    pattern = [9000, 4500]  # leading burst + space
+    pattern = [9000, 4500]
 
     def add_bit(bit):
-        pattern.append(560)  # burst
-        pattern.append(1690 if bit else 560)  # space
+        pattern.append(560)
+        pattern.append(1690 if bit else 560)
 
     def add_byte(byte_val):
         for i in range(8):
-            bit = (byte_val >> i) & 1  # LSB first
+            bit = (byte_val >> i) & 1
             add_bit(bit)
 
     addr = address & 0xFF
@@ -89,20 +64,15 @@ def nec_pattern(address, command):
     add_byte(cmd)
     add_byte(cmd_inv)
 
-    pattern.append(560)  # final stop burst
+    pattern.append(560)
     return pattern
 
 
 def send_ir(address, command, label=""):
-    """Transmit an NEC IR code, or simulate if not on Android/no IR emitter."""
     pattern = nec_pattern(address, command)
 
     if ANDROID and HAS_IR:
         try:
-            # pyjnius supports passing a Python list directly for an int[]
-            # parameter as long as every element is a plain Python int.
-            # The previous java.lang.reflect.Array approach produced an
-            # Object, not a primitive int[], which corrupted the Parcel.
             int_pattern = [int(v) for v in pattern]
             ir_manager.transmit(int(CARRIER_FREQ), int_pattern)
             print("Sent IR: %s (addr=0x%02X cmd=0x%02X) pattern_len=%d" %
@@ -118,9 +88,7 @@ def send_ir(address, command, label=""):
 
 
 # ----------------------------------------------------------------------
-# LG TV COMMAND TABLE (NEC address 0x04 - common LG TV address)
-# These are widely-used LG NEC command codes. If a button doesn't
-# work on your specific model, that command can be replaced.
+# LG TV COMMAND TABLE (UNCHANGED)
 # ----------------------------------------------------------------------
 LG_ADDRESS = 0x04
 
@@ -154,77 +122,147 @@ LG_COMMANDS = {
 
 
 # ----------------------------------------------------------------------
-# UI
+# UI COLORS - dark real-remote look
 # ----------------------------------------------------------------------
-class RemoteButton(Button):
-    pass
+BG_COLOR = (0.07, 0.07, 0.08, 1)        # near-black body
+BTN_COLOR = (0.16, 0.16, 0.18, 1)       # dark gray circular buttons
+BTN_PRESSED = (0.28, 0.28, 0.32, 1)
+POWER_COLOR = (0.75, 0.12, 0.12, 1)     # red power button
+OK_COLOR = (0.15, 0.4, 0.85, 1)         # blue OK button
+TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 
 
-class LGRemoteLayout(BoxLayout):
+class RoundButton(Button):
+    """A circular/rounded flat button drawn manually (real-remote look)."""
+    def __init__(self, bg_color=BTN_COLOR, radius=None, **kwargs):
+        super().__init__(**kwargs)
+        self.background_normal = ""
+        self.background_down = ""
+        self.background_color = (0, 0, 0, 0)  # hide default kivy bg
+        self.color = TEXT_COLOR
+        self.bold = True
+        self.bg_color = bg_color
+        self._radius = radius
+        with self.canvas.before:
+            self._color_instr = Color(*self.bg_color)
+            self._shape = RoundedRectangle(pos=self.pos, size=self.size, radius=[self._get_radius()])
+        self.bind(pos=self._update_shape, size=self._update_shape)
+        self.bind(state=self._update_color)
+
+    def _get_radius(self):
+        if self._radius is not None:
+            return self._radius
+        return min(self.width, self.height) / 2 if self.width and self.height else dp(28)
+
+    def _update_shape(self, *args):
+        self._shape.pos = self.pos
+        self._shape.size = self.size
+        self._shape.radius = [self._get_radius()]
+
+    def _update_color(self, *args):
+        self._color_instr.rgba = BTN_PRESSED if self.state == "down" else self.bg_color
+
+
+class LGRemoteLayout(FloatLayout):
     def __init__(self, **kwargs):
-        super().__init__(orientation="vertical", padding=dp(10), spacing=dp(8), **kwargs)
+        super().__init__(**kwargs)
 
-        status_text = "IR Emitter: %s" % ("OK \u2713" if HAS_IR else "NOT FOUND (simulation mode)")
+        with self.canvas.before:
+            Color(*BG_COLOR)
+            self._bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(24)])
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+        root = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
+        self.add_widget(root)
+
+        status_text = "IR: %s" % ("\u2713 Ready" if HAS_IR else "Simulation mode")
         self.status_label = Label(
             text=status_text,
-            size_hint=(1, 0.06),
-            color=(0, 1, 0, 1) if HAS_IR else (1, 0.3, 0.3, 1),
+            size_hint=(1, 0.05),
+            color=(0.3, 0.85, 0.4, 1) if HAS_IR else (0.85, 0.5, 0.2, 1),
             bold=True,
+            font_size="13sp",
         )
-        self.add_widget(self.status_label)
+        root.add_widget(self.status_label)
 
-        self.add_widget(self._section_label("LG TV Remote"))
+        # ---- Top row: Power / Input / Mute ----
+        top_row = BoxLayout(size_hint=(1, 0.11), spacing=dp(20), padding=(dp(30), 0))
+        top_row.add_widget(self._make_round("POWER", "\u23FB", bg=POWER_COLOR, font_size="22sp"))
+        top_row.add_widget(self._make_round("INPUT", "\u2192\u25A2", font_size="15sp"))
+        top_row.add_widget(self._make_round("MUTE", "\U0001F507", font_size="18sp"))
+        root.add_widget(top_row)
 
-        # Power + Input + Mute row
-        row1 = BoxLayout(size_hint=(1, 0.09), spacing=dp(6))
-        row1.add_widget(self._make_btn("POWER", "Power", bg=(0.8, 0.15, 0.15, 1)))
-        row1.add_widget(self._make_btn("INPUT", "Input"))
-        row1.add_widget(self._make_btn("MUTE", "Mute"))
-        self.add_widget(row1)
-
-        # Volume / Channel
-        row2 = BoxLayout(size_hint=(1, 0.09), spacing=dp(6))
-        row2.add_widget(self._make_btn("VOL_UP", "Vol +"))
-        row2.add_widget(self._make_btn("VOL_DOWN", "Vol -"))
-        row2.add_widget(self._make_btn("CH_UP", "Ch +"))
-        row2.add_widget(self._make_btn("CH_DOWN", "Ch -"))
-        self.add_widget(row2)
-
-        # D-Pad
-        dpad = GridLayout(cols=3, size_hint=(1, 0.28), spacing=dp(4))
+        # ---- D-Pad in a circular cluster ----
+        dpad_container = FloatLayout(size_hint=(1, 0.30))
+        dpad_size = dp(220)
+        dpad_wrap = BoxLayout(size_hint=(None, None), size=(dpad_size, dpad_size),
+                               pos_hint={"center_x": 0.5, "center_y": 0.5})
+        dpad = GridLayout(cols=3, rows=3, spacing=dp(3))
         dpad.add_widget(Label())
-        dpad.add_widget(self._make_btn("UP", "\u25b2"))
+        dpad.add_widget(self._make_round("UP", "\u25B2"))
         dpad.add_widget(Label())
-        dpad.add_widget(self._make_btn("LEFT", "\u25c0"))
-        dpad.add_widget(self._make_btn("OK", "OK", bg=(0.15, 0.45, 0.8, 1)))
-        dpad.add_widget(self._make_btn("RIGHT", "\u25b6"))
+        dpad.add_widget(self._make_round("LEFT", "\u25C0"))
+        dpad.add_widget(self._make_round("OK", "OK", bg=OK_COLOR, font_size="16sp"))
+        dpad.add_widget(self._make_round("RIGHT", "\u25B6"))
         dpad.add_widget(Label())
-        dpad.add_widget(self._make_btn("DOWN", "\u25bc"))
+        dpad.add_widget(self._make_round("DOWN", "\u25BC"))
         dpad.add_widget(Label())
-        self.add_widget(dpad)
+        dpad_wrap.add_widget(dpad)
+        dpad_container.add_widget(dpad_wrap)
+        root.add_widget(dpad_container)
 
-        # Menu / Back / Home
-        row3 = BoxLayout(size_hint=(1, 0.09), spacing=dp(6))
-        row3.add_widget(self._make_btn("BACK", "Back"))
-        row3.add_widget(self._make_btn("HOME", "Home"))
-        row3.add_widget(self._make_btn("MENU", "Menu"))
-        self.add_widget(row3)
+        # ---- Menu / Back / Home ----
+        row3 = BoxLayout(size_hint=(1, 0.09), spacing=dp(14))
+        row3.add_widget(self._make_pill("BACK", "Back"))
+        row3.add_widget(self._make_pill("HOME", "Home"))
+        row3.add_widget(self._make_pill("MENU", "Menu"))
+        root.add_widget(row3)
 
-        # Numpad
-        self.add_widget(self._section_label("Numbers"))
-        numpad = GridLayout(cols=3, size_hint=(1, 0.30), spacing=dp(4))
+        # ---- Volume / Channel ----
+        vc_row = BoxLayout(size_hint=(1, 0.11), spacing=dp(24), padding=(dp(10), 0))
+
+        vol_col = BoxLayout(orientation="vertical", spacing=dp(6))
+        vol_label = Label(text="VOL", size_hint=(1, 0.01), font_size="10sp", color=(0.6, 0.6, 0.6, 1))
+        vol_row = BoxLayout(spacing=dp(8))
+        vol_row.add_widget(self._make_round("VOL_UP", "+"))
+        vol_row.add_widget(self._make_round("VOL_DOWN", "\u2212"))
+        vol_col.add_widget(vol_label)
+        vol_col.add_widget(vol_row)
+
+        ch_col = BoxLayout(orientation="vertical", spacing=dp(6))
+        ch_label = Label(text="CH", size_hint=(1, 0.01), font_size="10sp", color=(0.6, 0.6, 0.6, 1))
+        ch_row = BoxLayout(spacing=dp(8))
+        ch_row.add_widget(self._make_round("CH_UP", "+"))
+        ch_row.add_widget(self._make_round("CH_DOWN", "\u2212"))
+        ch_col.add_widget(ch_label)
+        ch_col.add_widget(ch_row)
+
+        vc_row.add_widget(vol_col)
+        vc_row.add_widget(ch_col)
+        root.add_widget(vc_row)
+
+        # ---- Numpad ----
+        numpad = GridLayout(cols=3, size_hint=(1, 0.34), spacing=dp(8), padding=(dp(20), dp(4)))
         for n in ["1", "2", "3", "4", "5", "6", "7", "8", "9"]:
-            numpad.add_widget(self._make_btn(n, n))
+            numpad.add_widget(self._make_round(n, n, font_size="17sp"))
         numpad.add_widget(Label())
-        numpad.add_widget(self._make_btn("0", "0"))
+        numpad.add_widget(self._make_round("0", "0", font_size="17sp"))
         numpad.add_widget(Label())
-        self.add_widget(numpad)
+        root.add_widget(numpad)
 
-    def _section_label(self, text):
-        return Label(text=text, size_hint=(1, 0.05), bold=True, font_size="16sp")
+    def _update_bg(self, *args):
+        self._bg_rect.pos = self.pos
+        self._bg_rect.size = self.size
 
-    def _make_btn(self, cmd_key, text, bg=(0.25, 0.25, 0.25, 1)):
-        btn = RemoteButton(text=text, background_color=bg, font_size="18sp")
+    def _make_round(self, cmd_key, text, bg=BTN_COLOR, font_size="16sp"):
+        btn = RoundButton(text=text, bg_color=bg, font_size=font_size,
+                           size_hint=(1, 1))
+        btn.bind(on_press=lambda instance, k=cmd_key: self.on_button(k))
+        return btn
+
+    def _make_pill(self, cmd_key, text):
+        btn = RoundButton(text=text, bg_color=BTN_COLOR, font_size="13sp",
+                           radius=dp(18), size_hint=(1, 1))
         btn.bind(on_press=lambda instance, k=cmd_key: self.on_button(k))
         return btn
 
@@ -234,14 +272,16 @@ class LGRemoteLayout(BoxLayout):
             return
         success, msg = send_ir(LG_ADDRESS, command, label=cmd_key)
         self.status_label.text = msg
-        self.status_label.color = (0.2, 0.8, 1, 1) if success else (1, 0.3, 0.3, 1)
+        self.status_label.color = (0.3, 0.85, 1, 1) if success else (1, 0.3, 0.3, 1)
 
 
 class LGRemoteApp(App):
     def build(self):
         self.title = "LG IR Remote"
+        Window.clearcolor = BG_COLOR
         return LGRemoteLayout()
 
 
 if __name__ == "__main__":
     LGRemoteApp().run()
+	    
