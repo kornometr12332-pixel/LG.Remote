@@ -88,7 +88,7 @@ def send_ir(address, command, label=""):
 
 
 # ----------------------------------------------------------------------
-# LG TV COMMAND TABLE (UNCHANGED)
+# LG TV COMMAND TABLE
 # ----------------------------------------------------------------------
 LG_ADDRESS = 0x04
 
@@ -119,6 +119,12 @@ LG_COMMANDS = {
     "9":          0x18,
     "0":          0x19,
 }
+
+# Candidate codes for the channel-list button. Different LG TV models/years
+# use different codes for this button, so the LIST button below cycles
+# through them one at a time - press it repeatedly (no rebuild needed)
+# until the channel list appears on the TV, then note which number worked.
+LIST_CANDIDATES = [0x5B, 0x53, 0x1A, 0x4C, 0x0B, 0x1E, 0x1F]
 
 
 # ----------------------------------------------------------------------
@@ -175,7 +181,7 @@ class LGRemoteLayout(FloatLayout):
         root = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         self.add_widget(root)
 
-        status_text = "IR: %s" % ("\u2713 Ready" if HAS_IR else "Simulation mode")
+        status_text = "IR: %s" % ("Ready" if HAS_IR else "Simulation mode")
         self.status_label = Label(
             text=status_text,
             size_hint=(1, 0.05),
@@ -185,11 +191,15 @@ class LGRemoteLayout(FloatLayout):
         )
         root.add_widget(self.status_label)
 
-        # ---- Top row: Power / Input / Mute ----
-        top_row = BoxLayout(size_hint=(1, 0.11), spacing=dp(20), padding=(dp(30), 0))
-        top_row.add_widget(self._make_round("POWER", "\u23FB", bg=POWER_COLOR, font_size="22sp"))
-        top_row.add_widget(self._make_round("INPUT", "\u2192\u25A2", font_size="15sp"))
-        top_row.add_widget(self._make_round("MUTE", "\U0001F507", font_size="18sp"))
+        # ---- Top row: Power / Input / Mute / List ----
+        top_row = BoxLayout(size_hint=(1, 0.11), spacing=dp(14), padding=(dp(16), 0))
+        top_row.add_widget(self._make_round("POWER", "PWR", bg=POWER_COLOR, font_size="14sp"))
+        top_row.add_widget(self._make_round("INPUT", "IN", font_size="14sp"))
+        top_row.add_widget(self._make_round("MUTE", "MUTE", font_size="12sp"))
+        self.list_index = 0
+        self.list_btn = self._make_round("LIST", "LIST #1", font_size="12sp")
+        self.list_btn.bind(on_press=lambda instance: self.on_list_button())
+        top_row.add_widget(self.list_btn)
         root.add_widget(top_row)
 
         # ---- D-Pad in a circular cluster ----
@@ -199,13 +209,13 @@ class LGRemoteLayout(FloatLayout):
                                pos_hint={"center_x": 0.5, "center_y": 0.5})
         dpad = GridLayout(cols=3, rows=3, spacing=dp(3))
         dpad.add_widget(Label())
-        dpad.add_widget(self._make_round("UP", "\u25B2"))
+        dpad.add_widget(self._make_round("UP", "UP", font_size="13sp"))
         dpad.add_widget(Label())
-        dpad.add_widget(self._make_round("LEFT", "\u25C0"))
+        dpad.add_widget(self._make_round("LEFT", "LEFT", font_size="13sp"))
         dpad.add_widget(self._make_round("OK", "OK", bg=OK_COLOR, font_size="16sp"))
-        dpad.add_widget(self._make_round("RIGHT", "\u25B6"))
+        dpad.add_widget(self._make_round("RIGHT", "RIGHT", font_size="13sp"))
         dpad.add_widget(Label())
-        dpad.add_widget(self._make_round("DOWN", "\u25BC"))
+        dpad.add_widget(self._make_round("DOWN", "DOWN", font_size="13sp"))
         dpad.add_widget(Label())
         dpad_wrap.add_widget(dpad)
         dpad_container.add_widget(dpad_wrap)
@@ -225,7 +235,7 @@ class LGRemoteLayout(FloatLayout):
         vol_label = Label(text="VOL", size_hint=(1, 0.01), font_size="10sp", color=(0.6, 0.6, 0.6, 1))
         vol_row = BoxLayout(spacing=dp(8))
         vol_row.add_widget(self._make_round("VOL_UP", "+"))
-        vol_row.add_widget(self._make_round("VOL_DOWN", "\u2212"))
+        vol_row.add_widget(self._make_round("VOL_DOWN", "-"))
         vol_col.add_widget(vol_label)
         vol_col.add_widget(vol_row)
 
@@ -233,7 +243,7 @@ class LGRemoteLayout(FloatLayout):
         ch_label = Label(text="CH", size_hint=(1, 0.01), font_size="10sp", color=(0.6, 0.6, 0.6, 1))
         ch_row = BoxLayout(spacing=dp(8))
         ch_row.add_widget(self._make_round("CH_UP", "+"))
-        ch_row.add_widget(self._make_round("CH_DOWN", "\u2212"))
+        ch_row.add_widget(self._make_round("CH_DOWN", "-"))
         ch_col.add_widget(ch_label)
         ch_col.add_widget(ch_row)
 
@@ -274,6 +284,19 @@ class LGRemoteLayout(FloatLayout):
         self.status_label.text = msg
         self.status_label.color = (0.3, 0.85, 1, 1) if success else (1, 0.3, 0.3, 1)
 
+    def on_list_button(self):
+        # Sends the next candidate code each press so you don't need to
+        # rebuild the app to try different LIST codes. The button label
+        # and status bar show which candidate number was just sent -
+        # remember that number once the channel list appears on the TV.
+        code = LIST_CANDIDATES[self.list_index]
+        n = self.list_index + 1
+        success, msg = send_ir(LG_ADDRESS, code, label="LIST #%d (0x%02X)" % (n, code))
+        self.status_label.text = msg
+        self.status_label.color = (0.3, 0.85, 1, 1) if success else (1, 0.3, 0.3, 1)
+        self.list_index = (self.list_index + 1) % len(LIST_CANDIDATES)
+        self.list_btn.text = "LIST #%d" % (self.list_index + 1)
+
 
 class LGRemoteApp(App):
     def build(self):
@@ -284,4 +307,4 @@ class LGRemoteApp(App):
 
 if __name__ == "__main__":
     LGRemoteApp().run()
-	    
+		
