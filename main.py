@@ -108,6 +108,7 @@ LG_COMMANDS = {
     "BACK":       0x28,
     "HOME":       0x0E,
     "INPUT":      0x0B,
+    "LIST":       0x1A,   # Channel list - confirmed working on user's TV
     "1":          0x10,
     "2":          0x11,
     "3":          0x12,
@@ -120,11 +121,6 @@ LG_COMMANDS = {
     "0":          0x19,
 }
 
-# Candidate codes for the channel-list button. Different LG TV models/years
-# use different codes for this button, so the LIST button below cycles
-# through them one at a time - press it repeatedly (no rebuild needed)
-# until the channel list appears on the TV, then note which number worked.
-LIST_CANDIDATES = [0x5B, 0x53, 0x1A, 0x4C, 0x0B, 0x1E, 0x1F]
 
 
 # ----------------------------------------------------------------------
@@ -196,10 +192,7 @@ class LGRemoteLayout(FloatLayout):
         top_row.add_widget(self._make_round("POWER", "PWR", bg=POWER_COLOR, font_size="14sp"))
         top_row.add_widget(self._make_round("INPUT", "IN", font_size="14sp"))
         top_row.add_widget(self._make_round("MUTE", "MUTE", font_size="12sp"))
-        self.list_index = 0
-        self.list_btn = self._make_round("LIST", "LIST #1", font_size="12sp")
-        self.list_btn.bind(on_press=lambda instance: self.on_list_button())
-        top_row.add_widget(self.list_btn)
+        top_row.add_widget(self._make_round("LIST", "LIST", font_size="13sp"))
         root.add_widget(top_row)
 
         # ---- D-Pad in a circular cluster ----
@@ -284,19 +277,6 @@ class LGRemoteLayout(FloatLayout):
         self.status_label.text = msg
         self.status_label.color = (0.3, 0.85, 1, 1) if success else (1, 0.3, 0.3, 1)
 
-    def on_list_button(self):
-        # Sends the next candidate code each press so you don't need to
-        # rebuild the app to try different LIST codes. The button label
-        # and status bar show which candidate number was just sent -
-        # remember that number once the channel list appears on the TV.
-        code = LIST_CANDIDATES[self.list_index]
-        n = self.list_index + 1
-        success, msg = send_ir(LG_ADDRESS, code, label="LIST #%d (0x%02X)" % (n, code))
-        self.status_label.text = msg
-        self.status_label.color = (0.3, 0.85, 1, 1) if success else (1, 0.3, 0.3, 1)
-        self.list_index = (self.list_index + 1) % len(LIST_CANDIDATES)
-        self.list_btn.text = "LIST #%d" % (self.list_index + 1)
-
 
 class LGRemoteApp(App):
     def build(self):
@@ -307,4 +287,3 @@ class LGRemoteApp(App):
 
 if __name__ == "__main__":
     LGRemoteApp().run()
-		
